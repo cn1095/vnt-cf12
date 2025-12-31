@@ -128,21 +128,20 @@ export class PacketHandler {
     console.log(`[DEBUG] === HANDSHAKE START ===`);  
       
     const payload = packet.payload();  
-    console.log(`[DEBUG] Handshake payload length: ${payload.length}`);  
-    console.log(`[DEBUG] Handshake payload hex: ${Array.from(payload).map(b => b.toString(16).padStart(2, '0')).join('')}`);  
-      
     const handshakeReq = this.parseHandshakeRequest(payload);  
-    console.log(`[DEBUG] Parsed handshake request:`, handshakeReq);  
       
     const response = this.createHandshakeResponse(handshakeReq);  
-    console.log(`[DEBUG] Created handshake response, length: ${response.buffer().length}`);  
-    console.log(`[DEBUG] Response hex: ${Array.from(response.buffer()).map(b => b.toString(16).padStart(2, '0')).join('')}`);  
+      
+    // 设置通用参数  
+    this.setCommonParams(response, packet.source);  
+      
+    // 修复：使用属性访问而不是方法调用  
+    console.log(`[DEBUG] After setCommonParams - source: ${response.source}, dest: ${response.destination}`);  
       
     console.log(`[DEBUG] === HANDSHAKE END ===`);  
     return response;  
   } catch (error) {  
     console.error('[DEBUG] Handshake error:', error);  
-    console.error('[DEBUG] Handshake error stack:', error.stack);  
     return this.createErrorPacket(addr, packet.source, 'Handshake failed');  
   }  
 }    
@@ -376,17 +375,17 @@ export class PacketHandler {
 }   
   
   createHandshakeResponse(request) {  
-  const responseData = {      
-    version: "vnts_cloudflare",  
-    key_finger: new Uint8Array(32).fill(0),   
-    public_key: new Uint8Array(0),      
-    secret: false   
-  };    
+  const responseData = {
+    version: "vnts_cloudflare",
+    key_finger: "",
+    public_key: new Uint8Array(0),   
+    secret: false
+  };
     
   const responseBytes = this.encodeHandshakeResponse(responseData);      
   const response = NetPacket.new_encrypt(responseBytes.length + ENCRYPTION_RESERVED);      
         
-  // 修改回：使用 SERVICE 协议  
+  // 使用 SERVICE 协议  
   response.set_protocol(PROTOCOL.SERVICE);      
   response.set_transport_protocol(TRANSPORT_PROTOCOL.HandshakeResponse);      
   response.set_payload(responseBytes);      
@@ -441,10 +440,10 @@ export class PacketHandler {
     }    
   }    
   
-  encodeHandshakeResponse(data) {    
-    const { createHandshakeResponse } = require('./protos.js');    
-    return createHandshakeResponse(data.version, data.secret, data.key_finger);    
-  }    
+  encodeHandshakeResponse(data) {  
+  const { createHandshakeResponse } = require('./protos.js');  
+  return createHandshakeResponse(data.version, data.secret, data.public_key, data.key_finger);  
+}    
   
   encodeRegistrationResponse(data) {    
     const { createRegistrationResponse } = require('./protos.js');    
