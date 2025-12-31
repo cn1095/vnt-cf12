@@ -391,23 +391,24 @@ export class PacketHandler {
   }  
   
   parseHandshakeRequest(payload) {  
-    // 简化的握手请求解析  
-    return {  
-      version: "1.0.0",  
-      key_finger: new Uint8Array(32)  
-    };  
+  const { parseHandshakeRequest } = require('./protos.js');  
+  try {  
+    return parseHandshakeRequest(payload);  
+  } catch (error) {  
+    console.error('Failed to parse handshake request:', error);  
+    throw new Error('Invalid handshake request format');  
   }  
+}  
   
   parseRegistrationRequest(payload) {  
-    // 简化的注册请求解析  
-    return {  
-      token: "default",  
-      device_id: randomU64String(),  
-      name: "client",  
-      version: "1.0.0",  
-      client_secret_hash: new Uint8Array(0)  
-    };  
+  const { parseRegistrationRequest } = require('./protos.js');  
+  try {  
+    return parseRegistrationRequest(payload);  
+  } catch (error) {  
+    console.error('Failed to parse registration request:', error);  
+    throw new Error('Invalid registration request format');  
   }  
+}
   
   validateRegistrationRequest(request) {  
     if (!request.token || request.token.length === 0 || request.token.length > 128) {  
@@ -422,14 +423,22 @@ export class PacketHandler {
   }  
   
   encodeHandshakeResponse(data) {  
-    // 简化的编码实现  
-    return new Uint8Array(0);  
-  }  
+  const { createHandshakeResponse } = require('./protos.js');  
+  return createHandshakeResponse(data.version, data.secret, data.key_finger);  
+}  
   
-  encodeRegistrationResponse(data) {  
-    // 简化的编码实现  
-    return new Uint8Array(0);  
-  }  
+encodeRegistrationResponse(data) {  
+  const { createRegistrationResponse } = require('./protos.js');  
+  return createRegistrationResponse(  
+    data.virtual_ip,   
+    data.gateway,   
+    data.netmask,   
+    data.epoch,  
+    data.device_info_list,  
+    data.public_ip,  
+    data.public_port  
+  );  
+}
   
   parseIpv4(ipStr) {  
     if (!ipStr || typeof ipStr !== 'string') {  
