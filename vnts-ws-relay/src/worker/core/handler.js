@@ -213,20 +213,23 @@ export class PacketHandler {
       }
 
       // 检查是否是 ICMP ping 包
-      if (ipv4Packet.protocol === 1 && destination === context.link_context.network_info.gateway) {  
-  const icmpPacket = this.parseIcmpPacket(ipv4Packet.payload);  
-    
-  if (icmpPacket && icmpPacket.type === 8) {  
-    // 创建 ICMP Echo Reply  
-    return this.createPingResponse(  
-      packet,  
-      source,  
-      destination,  
-      ipv4Packet,  
-      icmpPacket  
-    );  
-  }  
-}
+      if (
+        ipv4Packet.protocol === 1 &&
+        destination === context.link_context.network_info.gateway
+      ) {
+        const icmpPacket = this.parseIcmpPacket(ipv4Packet.payload);
+
+        if (icmpPacket && icmpPacket.type === 8) {
+          // 创建 ICMP Echo Reply
+          return this.createPingResponse(
+            packet,
+            source,
+            destination,
+            ipv4Packet,
+            icmpPacket
+          );
+        }
+      }
 
       // 对于其他 IP 包，进行转发
       return await this.forwardIpPacket(context, packet, destination);
@@ -370,25 +373,25 @@ export class PacketHandler {
   }
 
   // 辅助方法：计算 IPv4 校验和
-  calculateIpv4Checksum(ipv4Packet) {  
-  const buffer = this.serializeIpv4Packet(ipv4Packet);  
-  let sum = 0;  
-    
-  // IPv4头部校验和（前20字节）  
-  for (let i = 0; i < 20; i += 2) {  
-    if (i + 1 < 20) {  
-      sum += (buffer[i] << 8) | buffer[i + 1];  
-    } else {  
-      sum += buffer[i] << 8;  
-    }  
-  }  
-    
-  while (sum >> 16) {  
-    sum = (sum & 0xffff) + (sum >> 16);  
-  }  
-    
-  return ~sum & 0xffff;  
-}
+  calculateIpv4Checksum(ipv4Packet) {
+    const buffer = this.serializeIpv4Packet(ipv4Packet);
+    let sum = 0;
+
+    // IPv4头部校验和（前20字节）
+    for (let i = 0; i < 20; i += 2) {
+      if (i + 1 < 20) {
+        sum += (buffer[i] << 8) | buffer[i + 1];
+      } else {
+        sum += buffer[i] << 8;
+      }
+    }
+
+    while (sum >> 16) {
+      sum = (sum & 0xffff) + (sum >> 16);
+    }
+
+    return ~sum & 0xffff;
+  }
 
   // 辅助方法：序列化 ICMP 包
   serializeIcmpPacket(icmpPacket) {
@@ -593,8 +596,8 @@ export class PacketHandler {
       // 添加到网络
       networkInfo.clients.set(virtualIp, clientInfo);
       networkInfo.epoch += 1;
-      // 保存网络信息引用  
-this.currentNetworkInfo = networkInfo; 
+      // 保存网络信息引用
+      this.currentNetworkInfo = networkInfo;
 
       // 创建链接上下文
       context.link_context = {
@@ -618,49 +621,49 @@ this.currentNetworkInfo = networkInfo;
     }
   }
 
-  async handlePing(packet, linkContext) {  
-  // 立即处理，不经过队列  
-  const currentTime = Date.now() & 0xffff; // 取低16位  
-  
-  // 创建 Pong 响应  
-  const pongPacket = this.createPongPacket(packet, currentTime);  
-  
-  // 返回响应包，让消息处理循环发送  
-  return pongPacket;  
-}
+  async handlePing(packet, linkContext) {
+    // 立即处理，不经过队列
+    const currentTime = Date.now() & 0xffff; // 取低16位
 
-  createPongPacket(pingPacket, currentTime) {  
-  // 使用非加密包，避免数据长度问题  
-  const packet = NetPacket.new(4); // 4字节载荷  
-    
-  // 设置协议头  
-  packet.set_protocol(PROTOCOL.CONTROL);  
-  packet.set_transport_protocol(TRANSPORT_PROTOCOL.Pong);  
-  packet.set_source(pingPacket.destination);  
-  packet.set_destination(pingPacket.source);  
-    
-  // 创建4字节载荷  
-  const payload = new Uint8Array(4);  
-  const view = new DataView(payload.buffer);  
-    
-  // 设置时间戳和epoch  
-  view.setUint16(0, currentTime & 0xffff, false); // 时间戳  
-  view.setUint16(2, this.getCurrentEpoch() & 0xffff, false); // epoch  
-    
-  // 设置载荷  
-  packet.set_payload(payload);  
-    
-  return packet;  
-}
-  
-// 获取当前epoch  
-getCurrentEpoch() {  
-  // 始终使用网络信息中的epoch，如果没有则返回0  
-  if (this.currentNetworkInfo) {  
-    return this.currentNetworkInfo.epoch || 0;  
-  }  
-  return 0; // 修复：返回固定值而不是时间戳  
-}
+    // 创建 Pong 响应
+    const pongPacket = this.createPongPacket(packet, currentTime);
+
+    // 返回响应包，让消息处理循环发送
+    return pongPacket;
+  }
+
+  createPongPacket(pingPacket, currentTime) {
+    // 使用非加密包，避免数据长度问题
+    const packet = NetPacket.new(4); // 4字节载荷
+
+    // 设置协议头
+    packet.set_protocol(PROTOCOL.CONTROL);
+    packet.set_transport_protocol(TRANSPORT_PROTOCOL.Pong);
+    packet.set_source(pingPacket.destination);
+    packet.set_destination(pingPacket.source);
+
+    // 创建4字节载荷
+    const payload = new Uint8Array(4);
+    const view = new DataView(payload.buffer);
+
+    // 设置时间戳和epoch
+    view.setUint16(0, currentTime & 0xffff, false); // 时间戳
+    view.setUint16(2, this.getCurrentEpoch() & 0xffff, false); // epoch
+
+    // 设置载荷
+    packet.set_payload(payload);
+
+    return packet;
+  }
+
+  // 获取当前epoch
+  getCurrentEpoch() {
+    // 始终使用网络信息中的epoch，如果没有则返回0
+    if (this.currentNetworkInfo) {
+      return this.currentNetworkInfo.epoch || 0;
+    }
+    return 0; // 修复：返回固定值而不是时间戳
+  }
   handleAddrRequest(addr) {
     const responseSize = 6 + ENCRYPTION_RESERVED;
     const response = NetPacket.new_encrypt(responseSize);
@@ -830,27 +833,27 @@ getCurrentEpoch() {
     }
   }
 
-  createHandshakeResponse(request) {  
-    const clientVersion = request.version || "1.2.16";  
-  
-    const responseData = {  
-        version: clientVersion,  
-        secret: false,  
-        public_key: new Uint8Array(0),  
-        key_finger: "",  
-    };  
-  
-    const responseBytes = this.encodeHandshakeResponse(responseData);  
-  
-    // 使用普通数据包而不是加密数据包  
-    const response = NetPacket.new(responseBytes.length);  
-  
-    response.set_protocol(PROTOCOL.SERVICE);  
-    response.set_transport_protocol(TRANSPORT_PROTOCOL.HandshakeResponse);  
-    response.set_payload(responseBytes);  // 这里应该正确工作  
-  
-    return response;  
-}
+  createHandshakeResponse(request) {
+    const clientVersion = request.version || "1.2.16";
+
+    const responseData = {
+      version: clientVersion,
+      secret: false,
+      public_key: new Uint8Array(0),
+      key_finger: "",
+    };
+
+    const responseBytes = this.encodeHandshakeResponse(responseData);
+
+    // 使用普通数据包而不是加密数据包
+    const response = NetPacket.new(responseBytes.length);
+
+    response.set_protocol(PROTOCOL.SERVICE);
+    response.set_transport_protocol(TRANSPORT_PROTOCOL.HandshakeResponse);
+    response.set_payload(responseBytes); // 这里应该正确工作
+
+    return response;
+  }
 
   createRegistrationResponse(virtualIp, networkInfo) {
     const responseData = {
