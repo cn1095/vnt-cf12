@@ -6,9 +6,12 @@ import { AesGcmCipher, randomU64String } from './crypto.js';
 export class PacketHandler {    
   constructor(env) {    
     this.env = env;    
-    this.cache = new AppCache();    
-    this.serverPeerId = 10000001; // VNT 服务器节点 ID    
-  }    
+    this.cache = new AppCache();  
+  }
+  calculateGateway(networkInfo) {  
+  // 网关是网段的 .1 地址  
+  return (networkInfo.network & networkInfo.netmask) | 0x01;  
+}  
   
   async handle(context, packet, addr, tcpSender) {  
   try {  
@@ -29,17 +32,18 @@ export class PacketHandler {
 }  
   
   async handleServerPacket(context, packet, addr, tcpSender) {  
-  console.log(`[DEBUG] handleServerPacket: protocol=${packet.protocol}, transport=${packet.transportProtocol}`);    
+  console.log(`[调试] 处理服务器包: 协议=${packet.protocol}, 传输=${packet.transportProtocol}`);   
   const source = packet.source;  
   
   // 处理服务协议 - 握手请求直接处理      
   if (packet.protocol === PROTOCOL.SERVICE) {  
-    console.log(`[DEBUG] SERVICE protocol detected, checking transport=${packet.transportProtocol}`);   
+    console.log(`[调试] 检测到 SERVICE 协议, 传输类型=${packet.transportProtocol}`);   
     switch (packet.transportProtocol) {      
       case TRANSPORT_PROTOCOL.HandshakeRequest:      
         return await this.handleHandshake(packet, addr);      
           
-      case TRANSPORT_PROTOCOL.SecretHandshakeRequest:      
+      case TRANSPORT_PROTOCOL.SecretHandshakeRequest:
+      	console.log(`[调试] 检测到注册请求, 调用 handleRegistration`);  
         return await this.handleSecretHandshake(context, packet, addr);      
           
       case TRANSPORT_PROTOCOL.RegistrationRequest:      
@@ -51,7 +55,8 @@ export class PacketHandler {
   }  
   
   // 新增：处理 CONTROL 协议的握手请求  
-  if (packet.protocol === PROTOCOL.CONTROL) {  
+  if (packet.protocol === PROTOCOL.CONTROL) {
+  	console.log(`[调试] 检测到 CONTROL 协议, 传输类型=${packet.transportProtocol}`);
     if (packet.transportProtocol === TRANSPORT_PROTOCOL.HandshakeRequest) {  
       console.log(`[DEBUG] CONTROL HandshakeRequest detected, handling...`);  
       return await this.handleHandshake(packet, addr);  
@@ -125,29 +130,44 @@ export class PacketHandler {
   
   async handleHandshake(packet, addr) {  
   try {  
-    console.log(`[DEBUG] === HANDSHAKE START ===`);  
+    console.log(`[调试] === 握手开始 ===`);  
       
     const payload = packet.payload();  
     const handshakeReq = this.parseHandshakeRequest(payload);  
       
-    console.log(`[DEBUG] Client handshake request:`, handshakeReq);  
+    console.log(`[调试] 客户端握手请求:`, handshakeReq);  
       
-    // 修复：使用客户端请求的信息创建响应  
     const response = this.createHandshakeResponse(handshakeReq);  
       
-    // 设置通用参数  
-    this.setCommonParams(response, packet.source);  
+    // 确保响应使用 SERVICE 协议  
+    response.set_protocol(PROTOCOL.SERVICE);  
+    response.set_transport_protocol(TRANSPORT_PROTOCOL.HandshakeResponse);  
       
-    console.log(`[DEBUG] After setCommonParams - source: ${response.source}, dest: ${response.destination}`);  
-    console.log(`[DEBUG] === HANDSHAKE END ===`);  
+    // 使用默认网关  
+    const defaultGateway = 0x0A240001; // 10.36.0.1  
+    this.setCommonParams(response, packet.source, defaultGateway);  
+      
+    // 关键修复：直接修改最终缓冲区的 TTL  
+    const finalBuffer = response.buffer();  
+    const view = new DataView(finalBuffer.buffer || finalBuffer);  
+    const currentTtl = view.getUint8(3);  
+    console.log(`[调试] 发送前 TTL 检查: 0x${currentTtl.toString(16).padStart(2, '0')}`);  
+      
+    // 强制设置 TTL 为 0xff (原始TTL=15, 当前TTL=15)  
+    view.setUint8(3, 0xff);  
+    console.log(`[调试] 强制修复 TTL 为: 0xff`);  
+      
+    console.log(`[调试] 握手响应协议: ${response.protocol}, 传输: ${response.transportProtocol}`);  
+    console.log(`[调试] 握手响应网关: ${this.formatIp(defaultGateway)}`);  
+    console.log(`[调试] === 握手结束 ===`);  
       
     return response;  
   } catch (error) {  
-    console.error('[DEBUG] Handshake error:', error);  
-    return this.createErrorPacket(addr, packet.source, 'Handshake failed');  
+    console.error('[调试] 握手错误:', error);  
+    return this.createErrorPacket(addr, packet.source, '握手失败');  
   }  
-}    
-  
+}
+
   async handleSecretHandshake(context, packet, addr) {    
     console.log(`Secret handshake from ${addr}`);    
         
@@ -171,54 +191,57 @@ export class PacketHandler {
     }    
   }    
   
-  async handleRegistration(context, packet, addr, tcpSender) {    
-    try {    
-      const payload = packet.payload();    
-      const registrationReq = this.parseRegistrationRequest(payload);    
-          
-      // 验证注册请求    
-      this.validateRegistrationRequest(registrationReq);    
-          
-      // 创建或获取网络信息    
-      const networkInfo = this.getOrCreateNetworkInfo(registrationReq.token);    
-          
-      // 分配虚拟 IP    
-      const virtualIp = this.allocateVirtualIp(networkInfo, registrationReq.device_id);    
-          
-      // 创建客户端信息    
-      const clientInfo = new ClientInfo({    
-        virtual_ip: virtualIp,    
-        device_id: registrationReq.device_id,    
-        name: registrationReq.name,    
-        version: registrationReq.version,    
-        online: true,    
-        address: addr,    
-        client_secret_hash: registrationReq.client_secret_hash,    
-        tcp_sender: tcpSender,    
-        timestamp: Date.now()    
-      });    
-          
-      // 添加到网络    
-      networkInfo.clients.set(virtualIp, clientInfo);    
-      networkInfo.epoch += 1;    
-          
-      // 创建链接上下文    
-      context.link_context = {    
-        group: registrationReq.token,    
-        virtual_ip: virtualIp,    
-        network_info: networkInfo,    
-        timestamp: Date.now()    
-      };    
-          
-      // 创建注册响应    
-      const response = this.createRegistrationResponse(virtualIp, networkInfo);    
-      return response;    
-          
-    } catch (error) {    
-      console.error('Registration error:', error);    
-      return this.createErrorPacket(addr, packet.source, 'Registration failed');    
-    }    
-  }    
+  async handleRegistration(context, packet, addr, tcpSender) { 
+  	console.log(`[DEBUG] Registration request received`);      
+    try {      
+      const payload = packet.payload();      
+      const registrationReq = this.parseRegistrationRequest(payload);      
+            
+      // 获取客户端请求的IP    
+      const requestedIp = registrationReq.virtual_ip || 0;      
+            
+      // 创建或获取网络信息      
+      const networkInfo = this.getOrCreateNetworkInfo(registrationReq.token, requestedIp);     
+            
+      // 分配虚拟 IP - 如果客户端指定了IP就直接使用，否则分配新的  
+      const virtualIp = requestedIp !== 0 ? requestedIp : this.allocateVirtualIp(networkInfo, registrationReq.device_id); 
+      console.log(`[DEBUG] Allocated IP: ${this.formatIp(virtualIp)}, 网关: ${this.formatIp(networkInfo.gateway)}`);     
+            
+      // 创建客户端信息      
+      const clientInfo = new ClientInfo({      
+        virtual_ip: virtualIp,      
+        device_id: registrationReq.device_id,      
+        name: registrationReq.name,      
+        version: registrationReq.version,      
+        online: true,      
+        address: addr,      
+        client_secret_hash: registrationReq.client_secret_hash,      
+        tcp_sender: tcpSender,      
+        timestamp: Date.now()      
+      });      
+            
+      // 添加到网络      
+      networkInfo.clients.set(virtualIp, clientInfo);      
+      networkInfo.epoch += 1;      
+            
+      // 创建链接上下文      
+      context.link_context = {      
+        group: registrationReq.token,      
+        virtual_ip: virtualIp,      
+        network_info: networkInfo,      
+        timestamp: Date.now()      
+      };      
+            
+      // 创建注册响应      
+      const response = this.createRegistrationResponse(virtualIp, networkInfo); 
+      console.log(`[DEBUG] Sending registration response: IP=${this.formatIp(virtualIp)}, Gateway=${this.formatIp(networkInfo.gateway)}`);     
+      return response;      
+            
+    } catch (error) {      
+      console.error('Registration error:', error);      
+      return this.createErrorPacket(addr, packet.source, 'Registration failed');      
+    }      
+  }
   
   handlePing(packet, linkContext) {  
   console.log(`[DEBUG] Handling ping packet`);  
@@ -356,14 +379,12 @@ export class PacketHandler {
   }    
   
   // 辅助方法    
-  setCommonParams(packet, source) {  
-  packet.set_source(this.serverPeerId);  // 10000001  
-    
-  // 修复：使用客户端的源地址而不是虚拟IP  
-  // 在握手阶段，使用客户端发送的源地址  
+  setCommonParams(packet, source, gateway) {  
+  packet.set_default_version();  
   packet.set_destination(source);  
-    
-  console.log(`[DEBUG] Set common params - source: ${this.serverPeerId}, dest: ${source}`);  
+  packet.set_source(gateway);  // 使用动态计算的网关  
+  packet.first_set_ttl(15);    // MAX_TTL = 0b1111 = 15  
+  packet.set_gateway_flag(true);  
 }  
   
 // 新增：计算客户端地址的方法  
@@ -520,24 +541,32 @@ calculateClientAddress(source) {
   }    
   
   // 网络管理方法    
-  getOrCreateNetworkInfo(token) {    
-    if (!this.cache.networks.has(token)) {    
-      this.cache.networks.set(token, new NetworkInfo({    
-        token: token,    
-        gateway: 0x0A000001, // 10.0.0.1    
-        netmask: 0xFFFFFF00, // 255.255.255.0    
-        epoch: 0,    
-        clients: new Map(),    
-        public_ip: 0,    
-        public_port: 0    
-      }));    
-    }    
-    return this.cache.networks.get(token);    
-  }    
+  getOrCreateNetworkInfo(token, requestedIp = 0) {  
+  if (!this.cache.networks.has(token)) {  
+    let gateway = 0x0A240001; // 默认 10.36.0.1  
+    let network = 0x0A240000; // 默认 10.36.0.0  
+    let netmask = 0xFFFFFF00; // 255.255.255.0  
+      
+    // 如果第一个客户端指定了IP，根据其更新网段  
+    if (requestedIp !== 0) {  
+      network = requestedIp & netmask;  
+      gateway = network | 0x01; // 网段的 .1 地址  
+      console.log(`[DEBUG] Network updated: gateway=${this.formatIp(gateway)}, network=${this.formatIp(network)}`);  
+    }  
+      
+    this.cache.networks.set(token, new NetworkInfo(network, netmask, gateway));  
+  }  
+  return this.cache.networks.get(token);  
+}  
+  
+// 辅助方法：格式化 IP 地址用于日志  
+formatIp(ipUint32) {  
+  return `${(ipUint32 >>> 24) & 0xFF}.${(ipUint32 >>> 16) & 0xFF}.${(ipUint32 >>> 8) & 0xFF}.${ipUint32 & 0xFF}`;  
+}   
   
   allocateVirtualIp(networkInfo, deviceId) {    
     // 简单的 IP 分配策略：从 10.0.0.2 开始分配    
-    const baseIp = 0x0A000002; // 10.0.0.2    
+    const baseIp = 0x0A240002; // 10.0.0.2    
     let currentIp = baseIp;    
       
     while (networkInfo.clients.has(currentIp)) {    

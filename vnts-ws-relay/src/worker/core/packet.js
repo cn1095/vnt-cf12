@@ -318,5 +318,33 @@ intToIpv4Bytes(ipInt) {
     ipInt & 0xFF  
   ];  
 }  
+set_default_version() {  
+  const buffer = this._getArrayBuffer();  
+  const view = new DataView(buffer);  
+  const byte0 = view.getUint8(0);  
+  // V2 = 2, 保留高4位标志，设置低4位为版本号  
+  view.setUint8(0, (byte0 & 0xF0) | 0x02);  
+  this.version = 2;  
+}  
+  
+first_set_ttl(ttl) {    
+  console.log(`[调试] first_set_ttl 被调用，ttl=${ttl}`);    
+      
+  const buffer = this._getArrayBuffer();    
+  const view = new DataView(buffer);    
+      
+  // 记录修改前的值    
+  const oldValue = view.getUint8(3);    
+  console.log(`[调试] TTL字节修改前: 0x${oldValue.toString(16).padStart(2, '0')}`);    
+      
+  // 设置 TTL    
+  const newValue = (ttl << 4) | ttl;    
+  view.setUint8(3, newValue);    
+      
+  // 记录修改后的值    
+  console.log(`[调试] TTL字节修改后: 0x${newValue.toString(16).padStart(2, '0')}`);    
+      
+  this.ttl = ttl;    
+}
 
 }
