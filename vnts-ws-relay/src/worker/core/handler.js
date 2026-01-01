@@ -6,7 +6,8 @@ import { AesGcmCipher, randomU64String } from './crypto.js';
 export class PacketHandler {    
   constructor(env) {    
     this.env = env;    
-    this.cache = new AppCache();  
+    this.cache = new AppCache();
+    this.cache.networks = new Map();
   }
   calculateGateway(networkInfo) {  
   // 网关是网段的 .1 地址  
@@ -430,46 +431,54 @@ calculateClientAddress(source) {
   const responseData = {  
     version: clientVersion,  
     secret: false,  
-    public_key: new Uint8Array(0),     
+    public_key: new Uint8Array(0),       
     key_finger: ""  
   };  
     
-  const responseBytes = this.encodeHandshakeResponse(responseData);        
-  const response = NetPacket.new_encrypt(responseBytes.length + ENCRYPTION_RESERVED);  
-          
-  // 恢复为 SERVICE 协议（与原始实现一致）  
-  response.set_protocol(PROTOCOL.SERVICE);        
-  response.set_transport_protocol(TRANSPORT_PROTOCOL.HandshakeResponse);        
+  const responseBytes = this.encodeHandshakeResponse(responseData);  
+    
+  // 使用普通数据包而不是加密数据包  
+  const response = NetPacket.new(responseBytes.length);  
+    
+  response.set_protocol(PROTOCOL.SERVICE);  
+  response.set_transport_protocol(TRANSPORT_PROTOCOL.HandshakeResponse);  
   response.set_payload(responseBytes);  
-          
-  return response;        
+    
+  return response;  
 }
   
-  createRegistrationResponse(virtualIp, networkInfo) {    
-    const responseData = {    
-      virtual_ip: virtualIp,    
-      gateway: networkInfo.gateway,    
-      netmask: networkInfo.netmask,    
-      epoch: networkInfo.epoch,    
-      device_info_list: Array.from(networkInfo.clients.values()).map(client => ({    
-        virtual_ip: client.virtual_ip,    
-        device_id: client.device_id,    
-        name: client.name,    
-        online: client.online    
-      })),    
-      public_ip: networkInfo.public_ip,    
-      public_port: networkInfo.public_port    
-    };    
+  createRegistrationResponse(virtualIp, networkInfo) {      
+  const responseData = {      
+    virtual_ip: virtualIp,      
+    gateway: networkInfo.gateway,      
+    netmask: networkInfo.netmask,      
+    epoch: networkInfo.epoch,      
+    device_info_list: Array.from(networkInfo.clients.values()).map(client => ({      
+      virtual_ip: client.virtual_ip,      
+      device_id: client.device_id,      
+      name: client.name,      
+      online: client.online      
+    })),      
+    public_ip: networkInfo.public_ip,      
+    public_port: networkInfo.public_port      
+  };      
         
-    const responseBytes = this.encodeRegistrationResponse(responseData);    
-    const response = NetPacket.new_encrypt(responseBytes.length + ENCRYPTION_RESERVED);    
+  const responseBytes = this.encodeRegistrationResponse(responseData);      
+  const response = NetPacket.new(responseBytes.length);   
+  response.set_default_version(); 
         
-    response.set_protocol(PROTOCOL.SERVICE);    
-    response.set_transport_protocol(TRANSPORT_PROTOCOL.RegistrationResponse);    
-    response.set_payload(responseBytes);    
+  response.set_protocol(PROTOCOL.SERVICE);      
+  response.set_transport_protocol(TRANSPORT_PROTOCOL.RegistrationResponse);    
+    
+  // 添加这些关键行：  
+  response.set_source(networkInfo.gateway);      // 设置源地址为网关  
+  response.set_destination(virtualIp);          // 设置目标地址为客户端  
+  response.set_gateway_flag(true);              // 设置网关标志  
+    
+  response.set_payload(responseBytes);      
         
-    return response;    
-  }    
+  return response;      
+}  
   
   // 协议解析方法    
   parseHandshakeRequest(payload) {    

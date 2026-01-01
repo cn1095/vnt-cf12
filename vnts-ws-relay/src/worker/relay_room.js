@@ -14,8 +14,8 @@ export class RelayRoom {
     // 新增：心跳管理  
     this.heartbeatTimers = new Map();  
     this.connectionTimeouts = new Map();  
-    this.heartbeatInterval = parseInt(env.HEARTBEAT_INTERVAL || '30') * 1000; // 转换为毫秒  
-    this.connectionTimeout = 60000; // 60秒连接超时  
+    this.heartbeatInterval = parseInt(env.HEARTBEAT_INTERVAL || '60') * 1000; // 转换为毫秒  
+    this.connectionTimeout = 120000; // 120秒连接超时  
   }  
   
   async fetch(request) {  
@@ -54,15 +54,35 @@ export class RelayRoom {
       await this.handleMessage(clientId, event.data);  
     });  
       
-    server.addEventListener('close', () => {  
-      console.log(`[DEBUG] WebSocket closed: ${clientId}`);  
-      this.handleClose(clientId);  
-    });  
+    server.addEventListener('close', (event) => {  
+  console.log(`[调试] WebSocket关闭: ${clientId}`);  
+  console.log(`[调试] 关闭代码: ${event.code}`);  
+  console.log(`[调试] 关闭原因: ${event.reason}`);  
+  console.log(`[调试] 是否干净关闭: ${event.wasClean}`);  
+    
+  // 检查连接状态  
+  const connectionInfo = this.getConnectionInfo(clientId);  
+  if (connectionInfo) {  
+    const inactiveTime = Date.now() - connectionInfo.lastActivity;  
+    console.log(`[调试] 连接非活跃时间: ${Math.round(inactiveTime/1000)}秒`);  
+  }  
+    
+  this.handleClose(clientId);  
+});  
       
     server.addEventListener('error', (error) => {  
-      console.error(`[DEBUG] WebSocket error for ${clientId}:`, error);  
-      this.handleClose(clientId);  
-    });  
+  console.error(`[调试] WebSocket错误 ${clientId}:`, error);  
+  console.error(`[调试] 错误类型: ${error.type || 'unknown'}`);  
+  console.error(`[调试] 错误消息: ${error.message || 'no message'}`);  
+    
+  // 记录连接状态  
+  const connectionInfo = this.getConnectionInfo(clientId);  
+  if (connectionInfo) {  
+    console.log(`[调试] 错误时连接状态:`, connectionInfo);  
+  }  
+    
+  this.handleClose(clientId);  
+});  
       
     // 新增：添加 ping/pong 事件监听  
     server.addEventListener('ping', () => {  
@@ -82,7 +102,8 @@ export class RelayRoom {
   }  
   
   // 新增：初始化连接管理  
-  initializeConnection(clientId, server) {  
+  initializeConnection(clientId, server) { 
+  console.log(`[调试] 初始化连接: ${clientId}`); 
     const connectionInfo = {  
       server: server,  
       lastActivity: Date.now(),  
@@ -92,16 +113,23 @@ export class RelayRoom {
       
     // 设置连接超时检测  
     const timeoutId = setTimeout(() => {  
-      console.log(`[DEBUG] Connection timeout for ${clientId}`);  
+      console.log(`[调试] 连接超时，准备关闭: ${clientId}`); 
       this.handleClose(clientId);  
     }, this.connectionTimeout);  
       
     this.connectionTimeouts.set(clientId, timeoutId);  
       
     // 启动心跳定时器  
+    console.log(`[调试] 启动心跳机制，间隔: ${this.heartbeatInterval/1000}秒`);
     this.startHeartbeat(clientId);  
+    // 新增：启动定期健康检查（每5分钟执行一次）  
+  if (!this.healthCheckInterval) {  
+    this.healthCheckInterval = setInterval(() => {  
+      this.checkConnectionHealth();  
+    }, 300000); // 5分钟  
+  }
       
-    console.log(`[DEBUG] Connection initialized for ${clientId}`);  
+    console.log(`[调试] 连接初始化完成: ${clientId}`); 
   }  
   
   // 新增：启动心跳机制  
@@ -111,17 +139,18 @@ export class RelayRoom {
       
     const heartbeatId = setInterval(() => {  
       try {  
-        console.log(`[DEBUG] Sending heartbeat ping to ${clientId}`);  
+        console.log(`[调试] 发送心跳包到: ${clientId}`); 
         server.ping();  
           
         // 检查连接状态  
         const connectionInfo = this.getConnectionInfo(clientId);  
         if (connectionInfo && Date.now() - connectionInfo.lastActivity > this.connectionTimeout) {  
-          console.log(`[DEBUG] Connection ${clientId} appears dead, closing`);  
+          console.log(`[调试] 连接 ${clientId} 似乎已死机，准备关闭`);  
           this.handleClose(clientId);  
         }  
       } catch (error) {  
-        console.error(`[DEBUG] Heartbeat failed for ${clientId}:`, error);  
+        console.error(`[调试] 心跳失败 ${clientId}:`, error);
+        console.log(`[调试] 由于心跳失败，关闭连接: ${clientId}`);  
         this.handleClose(clientId);  
       }  
     }, this.heartbeatInterval);  
@@ -149,17 +178,18 @@ export class RelayRoom {
   
   async handleMessage(clientId, data) {  
     try {  
-      console.log(`[DEBUG] Received data from ${clientId}`);  
-      console.log(`[DEBUG] Data type: ${typeof data}`);  
-      console.log(`[DEBUG] Data length: ${data ? data.length || data.byteLength : 'null'}`);  
-        
+      console.log(`[调试] 收到来自 ${clientId} 的数据`);  
+    console.log(`[调试] 数据类型: ${typeof data}`);  
+    console.log(`[调试] 数据长度: ${data ? data.length || data.byteLength : 'null'}`);  
+      
       if (!data) {  
-        console.log(`[DEBUG] No data received from ${clientId}`);  
+        console.log(`[调试] ${clientId} 未发送数据`);   
         return;  
       }  
         
       // 更新活动时间  
       this.updateLastActivity(clientId);  
+      console.log(`[调试] 更新 ${clientId} 活动时间`);
         
       // 转换为 Uint8Array  
       let uint8Data;  
@@ -170,12 +200,12 @@ export class RelayRoom {
       } else if (ArrayBuffer.isView(data)) {  
         uint8Data = new Uint8Array(data.buffer);  
       } else {  
-        console.log(`[DEBUG] Unsupported data type: ${typeof data}`);  
+        console.log(`[调试] 不支持的数据类型: ${typeof data}`);  
         return;  
       }  
         
       const hexString = Array.from(uint8Data).map(b => b.toString(16).padStart(2, '0')).join('');  
-      console.log(`[DEBUG] Data hex: ${hexString}`);  
+      console.log(`[调试] 数据十六进制: ${hexString}`);  
         
       const context = this.contexts.get(clientId);  
       const server = this.connections.get(clientId);  
@@ -221,15 +251,19 @@ export class RelayRoom {
         
       // 发送响应 - 修复：避免重复发送  
       if (response) {  
-        try {  
-        	// 添加数据包验证  
-    this.packetHandler.validatePacket(response);
-          console.log(`[DEBUG] Sending response to ${clientId}, length: ${response.buffer().length}`);  
-          server.send(response.buffer());  
-        } catch (error) {  
-          console.error(`[DEBUG] Failed to send response to ${clientId}:`, error);  
-        }  
-      } else {  
+  try {  
+    this.packetHandler.validatePacket(response);  
+    console.log(`[调试] 发送响应到 ${clientId}，长度: ${response.buffer().length}`);  
+    server.send(response.buffer());  
+  } catch (error) {  
+    console.error(`[调试] 发送响应失败 ${clientId}:`, error);  
+    // 检查是否是连接已关闭的错误  
+    if (error.message.includes('closed') || error.message.includes('terminated')) {  
+      console.log(`[调试] 检测到连接已关闭，清理: ${clientId}`);  
+      this.handleClose(clientId);  
+    }  
+  }  
+} else {  
         console.log(`[DEBUG] No response generated for ${clientId}`);  
       }  
         
@@ -239,9 +273,18 @@ export class RelayRoom {
       }  
         
     } catch (error) {  
-      console.error(`[DEBUG] Message handling error for ${clientId}:`, error);  
-      console.error(`[DEBUG] Error stack:`, error.stack);  
-    }  
+  console.error(`[调试] 处理 ${clientId} 消息时出错:`, error);  
+  console.error(`[调试] 错误堆栈:`, error.stack);  
+    
+  // 不要立即关闭连接，记录错误继续  
+  console.log(`[调试] 记录错误但保持连接: ${clientId}`);  
+    
+  // 如果是严重错误，才关闭连接  
+  if (error.message.includes('WebSocket') || error.message.includes('connection')) {  
+    console.log(`[调试] 检测到连接错误，关闭: ${clientId}`);  
+    this.handleClose(clientId);  
+  } 
+  }
   }  
   
   // 新增：判断是否需要广播  
@@ -322,22 +365,24 @@ shouldBroadcast(packet) {
   
   // 修复：增强的连接关闭处理  
   handleClose(clientId) {  
-    console.log(`[DEBUG] Cleaning up connection: ${clientId}`);  
+    console.log(`[调试] 开始清理连接: ${clientId}`);  
       
     const context = this.contexts.get(clientId);  
       
     if (context) {  
       try {  
-        // 清理连接  
+        // 清理连接 
+        console.log(`[调试] 清理 ${clientId} 的上下文`);  
         this.packetHandler.leave(context);  
       } catch (error) {  
-        console.error(`[DEBUG] Error during cleanup for ${clientId}:`, error);  
+        console.error(`[调试] 清理 ${clientId} 上下文时出错:`, error);    
       }  
     }  
       
     // 清理心跳定时器  
     const heartbeatId = this.heartbeatTimers.get(clientId);  
     if (heartbeatId) {  
+    console.log(`[调试] 停止 ${clientId} 的心跳定时器`);  
       clearInterval(heartbeatId);  
       this.heartbeatTimers.delete(clientId);  
     }  
@@ -345,6 +390,7 @@ shouldBroadcast(packet) {
     // 清理连接超时定时器  
     const timeoutId = this.connectionTimeouts.get(clientId);  
     if (timeoutId) {  
+    console.log(`[调试] 清除 ${clientId} 的超时定时器`);
       clearTimeout(timeoutId);  
       this.connectionTimeouts.delete(clientId);  
     }  
@@ -352,8 +398,15 @@ shouldBroadcast(packet) {
     // 清理连接和上下文  
     this.contexts.delete(clientId);  
     this.connections.delete(clientId);  
+    
+    // 如果没有活跃连接了，停止健康检查  
+  if (this.connections.size === 0 && this.healthCheckInterval) {  
+    clearInterval(this.healthCheckInterval);  
+    this.healthCheckInterval = null;  
+    console.log(`[调试] 停止健康检查定时器`);  
+  }
       
-    console.log(`[DEBUG] Connection ${clientId} cleaned up successfully`);  
+    console.log(`[调试] 连接 ${clientId} 清理完成`);  
   }  
   
   generateClientId() {  
@@ -382,4 +435,25 @@ shouldBroadcast(packet) {
       }  
     }  
   }  
+  // 新增：定期检查连接状态  
+checkConnectionHealth() {  
+  const now = Date.now();  
+  console.log(`[调试] 开始健康检查，当前连接数: ${this.connections.size}`);  
+    
+  for (const [clientId, server] of this.connections) {  
+    const connectionInfo = this.getConnectionInfo(clientId);  
+      
+    if (connectionInfo) {  
+      const inactiveTime = now - connectionInfo.lastActivity;  
+      console.log(`[调试] 连接 ${clientId} 非活跃时间: ${Math.round(inactiveTime/1000)}秒`);  
+        
+      if (inactiveTime > this.connectionTimeout) {  
+        console.log(`[调试] 连接 ${clientId} 超时，准备清理`);  
+        this.handleClose(clientId);  
+      }  
+    }  
+  }  
+    
+  console.log(`[调试] 健康检查完成`);  
+}
 }

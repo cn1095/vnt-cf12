@@ -112,6 +112,9 @@ export class NetPacket {
     return this.data.slice(this.offset);    
   }    
   
+  payload_mut() {  
+  return new Uint8Array(this.data.buffer, this.offset, this.data.length - this.offset);  
+}
   is_encrypt() {    
     return (this.flags & 0x01) !== 0;    
   }    
@@ -164,7 +167,13 @@ export class NetPacket {
   buffer() {    
     return this.data;    
   }    
-  
+  static new(size) {  
+  const totalSize = 12 + size;  // VNT header is 12 bytes  
+  const buffer = new Uint8Array(totalSize); 
+  // 确保第一个字节不包含加密标志  
+  buffer[0] = 0x00;  // 清除所有标志  
+  return new NetPacket(buffer);  
+}
   static new_encrypt(size) {    
     const totalSize = 12 + size + ENCRYPTION_RESERVED;  // VNT header is 12 bytes    
     const buffer = new Uint8Array(totalSize);    
