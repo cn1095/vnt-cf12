@@ -404,28 +404,22 @@ calculateClientAddress(source) {
 }  
   
   createHandshakeResponse(request) {  
-  // 使用客户端请求的版本号  
   const clientVersion = request.version || "1.2.16";  
     
   const responseData = {  
-    version: clientVersion,  // 匹配客户端版本  
-    secret: false,           // 与客户端请求一致  
+    version: clientVersion,  
+    secret: false,  
     public_key: new Uint8Array(0),     
     key_finger: ""  
   };  
     
-  console.log(`[DEBUG] Creating handshake response with version: ${clientVersion}`);  
-    
   const responseBytes = this.encodeHandshakeResponse(responseData);        
   const response = NetPacket.new_encrypt(responseBytes.length + ENCRYPTION_RESERVED);  
           
-  // 关键：使用 SERVICE 协议而不是 CONTROL  
-  response.set_protocol(PROTOCOL.SERVICE);      // 必须是 0  
+  // 恢复为 SERVICE 协议（与原始实现一致）  
+  response.set_protocol(PROTOCOL.SERVICE);        
   response.set_transport_protocol(TRANSPORT_PROTOCOL.HandshakeResponse);        
   response.set_payload(responseBytes);  
-    
-  console.log(`[DEBUG] Handshake response created, length: ${responseBytes.length}`);  
-  console.log(`[DEBUG] Response hex: ${Array.from(responseBytes).map(b => b.toString(16).padStart(2, '0')).join('')}`);  
           
   return response;        
 }
