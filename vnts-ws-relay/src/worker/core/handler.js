@@ -247,24 +247,21 @@ export class PacketHandler {
   handlePing(packet, linkContext) {  
   console.log(`[DEBUG] Handling ping packet`);  
     
+  // 完全模仿vnts服务端的实现  
   const responseSize = 12 + 4 + ENCRYPTION_RESERVED;  
   const response = NetPacket.new_encrypt(responseSize);  
     
   response.set_protocol(PROTOCOL.CONTROL);  
   response.set_transport_protocol(TRANSPORT_PROTOCOL.Pong);  
     
-  // 复制 ping 负载  
+  // 完整复制，不做任何修改  
   const payload = packet.payload();  
-  response.set_payload(payload.slice(0, 12));  
+  response.set_payload(payload);  
     
-  // 设置 epoch  
-  const pongPayload = response.payload_mut();  
-  const view = new DataView(pongPayload.buffer, pongPayload.byteOffset);  
-  view.setUint16(12, linkContext.network_info.epoch & 0xFFFF, true);  
-    
-  console.log(`[DEBUG] Pong response created, epoch: ${linkContext.network_info.epoch}`);  
+  // 不手动设置epoch，让客户端处理  
+  console.log(`[DEBUG] Pong response created`);  
   return response;  
-}    
+}
   
   handleAddrRequest(addr) {    
     const responseSize = 6 + ENCRYPTION_RESERVED;    
@@ -383,7 +380,7 @@ export class PacketHandler {
   setCommonParams(packet, source, gateway) {  
   packet.set_default_version();  
   packet.set_destination(source);  
-  packet.set_source(gateway);  // 使用动态计算的网关  
+  packet.set_source(0x0A240001); 
   packet.first_set_ttl(15);    // MAX_TTL = 0b1111 = 15  
   packet.set_gateway_flag(true);  
 }  
@@ -447,23 +444,26 @@ calculateClientAddress(source) {
   return response;  
 }
   
-  createRegistrationResponse(virtualIp, networkInfo) {      
-  const responseData = {      
-    virtual_ip: virtualIp,      
-    virtual_gateway: networkInfo.gateway,      
-    virtual_netmask: networkInfo.netmask,      
-    epoch: networkInfo.epoch,      
-    device_info_list: Array.from(networkInfo.clients.values()).map(client => ({        
-      name: client.name,                        // ✅ 添加 name 字段  
-      virtual_ip: client.virtual_ip,        
-      device_status: client.online ? 1 : 0,     // ✅ 添加 device_status  
-      client_secret: false,                    // ✅ 添加 client_secret  
-      client_secret_hash: new Uint8Array(0),   // ✅ 添加 client_secret_hash  
-      wireguard: false                         // ✅ 添加 wireguard  
-    })),      
-    public_ip: networkInfo.public_ip,      
-    public_port: networkInfo.public_port,
-    public_ipv6: new Uint8Array(0)      
+  createRegistrationResponse(virtualIp, networkInfo) {  
+  const responseData = {  
+    virtual_ip: virtualIp,  
+    virtual_gateway: networkInfo.gateway,  
+    virtual_netmask: networkInfo.netmask,  
+    epoch: networkInfo.epoch,  
+    // 修复：过滤掉未完全初始化的客户端  
+    device_info_list: Array.from(networkInfo.clients.values())  
+      .filter(client => client.virtual_ip !== 0 && client.online)  // 只显示有效IP的在线客户端  
+      .map(client => ({  
+        name: client.name,  
+        virtual_ip: client.virtual_ip,  
+        device_status: client.online ? 1 : 0,  
+        client_secret: false,  
+        client_secret_hash: new Uint8Array(0),  
+        wireguard: false  
+      })),  
+    public_ip: networkInfo.public_ip,  
+    public_port: networkInfo.public_port,  
+    public_ipv6: new Uint8Array(0)  
   };      
         
   const responseBytes = this.encodeRegistrationResponse(responseData);      
@@ -514,8 +514,8 @@ calculateClientAddress(source) {
     const { createRegistrationResponse } = require('./protos.js');    
     return createRegistrationResponse(    
       data.virtual_ip,    
-      data.gateway,    
-      data.netmask,    
+      data.virtual_gateway,    
+      data.virtual_netmask,    
       data.epoch,    
       data.device_info_list,    
       data.public_ip,    
@@ -557,14 +557,13 @@ calculateClientAddress(source) {
   getOrCreateNetworkInfo(token, requestedIp = 0) {  
   if (!this.cache.networks.has(token)) {  
     let gateway = 0x0A240001; // 默认 10.36.0.1  
-    let network = 0x0A240000; // 默认 10.36.0.0  
+    let network = 0x0A240001; // 默认 10.36.0.0  
     let netmask = 0xFFFFFF00; // 255.255.255.0  
       
     // 如果第一个客户端指定了IP，根据其更新网段  
     if (requestedIp !== 0) {  
-      network = requestedIp & netmask;  
-      gateway = network | 0x01; // 网段的 .1 地址  
-      console.log(`[DEBUG] Network updated: gateway=${this.formatIp(gateway)}, network=${this.formatIp(network)}`);  
+      network = requestedIp & netmask; 
+      console.log(`[DEBUG] 客户端网段更新: 网关=${this.formatIp(gateway)}, 网络=${this.formatIp(network)}`);  
     }  
       
     this.cache.networks.set(token, new NetworkInfo(network, netmask, gateway));  
@@ -579,7 +578,7 @@ formatIp(ipUint32) {
   
   allocateVirtualIp(networkInfo, deviceId) {    
     // 简单的 IP 分配策略：从 10.0.0.2 开始分配    
-    const baseIp = 0x0A240002; // 10.0.0.2    
+    const baseIp = (networkInfo.network & 0xFFFFFF00) + 2;     
     let currentIp = baseIp;    
       
     while (networkInfo.clients.has(currentIp)) {    
