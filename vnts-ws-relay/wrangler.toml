@@ -4,7 +4,10 @@ compatibility_date = "2023-10-30"
   
 [vars]
 # 连接后缀：防止别人连接使用输入正确的后缀才能连接 ，用法 -s wss://域名/后缀
-WS_PATH = "ws"  
+WS_PATH = "ws" 
+
+# 默认网关地址  
+GATEWAY = "10.46.0.1" 
   
 # 是否禁用中继转发： 0 允许中继  1 仅P2P
 DISABLE_RELAY = "0"
